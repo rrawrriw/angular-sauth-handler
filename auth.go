@@ -1,4 +1,4 @@
-package bebber
+package aauth
 
 import (
 	"errors"
@@ -103,7 +103,7 @@ func Auther(c *gin.Context, db *mgo.Database, sessionsColl string) error {
 		return err
 	}
 	if session.Expires.Before(time.Now()) {
-		errors.New("Session expired")
+		return errors.New("Session expired")
 	}
 
 	c.Set(GinContextField, session)

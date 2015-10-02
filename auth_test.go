@@ -1,4 +1,4 @@
-package bebber
+package aauth
 
 import (
 	"bytes"
