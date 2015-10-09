@@ -58,8 +58,8 @@ func NewFailResponse(err interface{}) FailResponse {
 // }
 //
 // s,_ := db.Dial("mongodb://127.0.0.1:27017")
-// db := s.DB("DBName", "SessionCollName")
-// auth := AngularAuth(*mgo.Database)
+// db := s.DB("DBName")
+// auth := AngularAuth(*mgo.Database, "SessionCollName")
 // app.GET(auth, portectedHandler)
 //
 func AngularAuth(db *mgo.Database, coll string) gin.HandlerFunc {
