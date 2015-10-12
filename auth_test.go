@@ -3,6 +3,8 @@ package aauth
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -25,7 +27,20 @@ type (
 		Handler http.Handler
 		Header  http.Header
 	}
+
+	TestUser struct {
+		id   string
+		pass string
+	}
 )
+
+func (u TestUser) ID() string {
+	return u.id
+}
+
+func (u TestUser) Password() string {
+	return u.pass
+}
 
 func (t *TestRequest) SendWithToken(method, path, token string) *httptest.ResponseRecorder {
 	reqData := *t
@@ -34,6 +49,17 @@ func (t *TestRequest) SendWithToken(method, path, token string) *httptest.Respon
 
 	req, _ := http.NewRequest(method, path, body)
 	req.Header = reqData.Header
+	w := httptest.NewRecorder()
+	reqData.Handler.ServeHTTP(w, req)
+	*t = reqData
+	return w
+}
+
+func (t *TestRequest) Send(method, path string) *httptest.ResponseRecorder {
+	reqData := *t
+	body := bytes.NewBufferString(reqData.Body)
+
+	req, _ := http.NewRequest(method, path, body)
 	w := httptest.NewRecorder()
 	reqData.Handler.ServeHTTP(w, req)
 	*t = reqData
@@ -71,6 +97,57 @@ func CleanTestDB(t *testing.T, s *mgo.Session, db *mgo.Database) {
 	}
 
 	s.Close()
+}
+
+func ParseSignInResponse(r *bytes.Buffer) (SuccessResponse, error) {
+
+	resp := SuccessResponse{}
+	err := json.Unmarshal(r.Bytes(), &resp)
+	if err != nil {
+		return SuccessResponse{}, err
+	}
+
+	if resp.Status != "success" {
+		return SuccessResponse{}, errors.New("Wrong status")
+	}
+
+	v, ok := resp.Data.(map[string]interface{})
+	if !ok {
+		return SuccessResponse{}, errors.New("Wrong data type")
+	}
+
+	id, ok := v["ID"].(string)
+	if !ok {
+		return SuccessResponse{}, errors.New("Wrong id type")
+	}
+
+	data := UserIDData{
+		ID: id,
+	}
+
+	return NewSuccessResponse(data), nil
+}
+
+func EqualSignInResponse(r1, r2 SuccessResponse) error {
+	if r1.Status != r2.Status {
+		return errors.New("Unequal status")
+	}
+
+	id1, ok := r1.Data.(UserIDData)
+	if !ok {
+		return errors.New("Wrong data in r1")
+	}
+	id2, ok := r1.Data.(UserIDData)
+	if !ok {
+		return errors.New("Wrong data in r2")
+	}
+
+	if id1 != id2 {
+		return errors.New("Unequal ids")
+	}
+
+	return nil
+
 }
 
 func Test_VerifyAuth_OK(t *testing.T) {
@@ -175,6 +252,45 @@ func Test_VerifyAuth_ExpiresFail(t *testing.T) {
 
 	if response.Code != 401 {
 		t.Fatal("Expect http-status 401 was", response.Code)
+	}
+
+}
+
+func Test_GET_SignIn_OK(t *testing.T) {
+	id := "456"
+	name := "ladykiller_XX"
+	pass := "123"
+
+	handler := gin.New()
+	req := TestRequest{
+		Body:    "",
+		Header:  http.Header{},
+		Handler: handler,
+	}
+
+	getPass := func(x string) (User, error) {
+		u := TestUser{id, pass}
+		return u, nil
+	}
+
+	handler.GET("/:name/:pass", AngularSignIn(getPass))
+
+	url := fmt.Sprintf("/%v/%v", name, pass)
+	resp := req.Send("GET", url)
+
+	userID := UserIDData{
+		ID: id,
+	}
+	expectResp := NewSuccessResponse(userID)
+
+	result, err := ParseSignInResponse(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = EqualSignInResponse(expectResp, result)
+	if err != nil {
+		t.Fatal("Expect", expectResp, "was", resp)
 	}
 
 }

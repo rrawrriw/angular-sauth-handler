@@ -15,12 +15,27 @@ const (
 	GinContextField  = "Session"
 	XSRFCookieName   = "XSRF-TOKEN"
 	TokenHeaderField = "X-XSRF-TOKEN"
+	NameRequestField = "name"
+	PassRequestField = "pass"
+)
+
+var (
+	SignInErr = errors.New("Sign in error")
 )
 
 type (
+	SuccessResponse struct {
+		Status string
+		Data   interface{}
+	}
+
 	FailResponse struct {
 		Status string
 		Err    string
+	}
+
+	UserIDData struct {
+		ID string
 	}
 
 	Session struct {
@@ -28,7 +43,21 @@ type (
 		UserID  string    `bson:"UserID"`
 		Expires time.Time `bson:"Expires"`
 	}
+
+	User interface {
+		ID() string
+		Password() string
+	}
+
+	FindUser func(string) (User, error)
 )
+
+func NewSuccessResponse(data interface{}) SuccessResponse {
+	return SuccessResponse{
+		Status: "success",
+		Data:   data,
+	}
+}
 
 func NewFailResponse(err interface{}) FailResponse {
 	return FailResponse{
@@ -108,5 +137,37 @@ func Auther(c *gin.Context, db *mgo.Database, sessionsColl string) error {
 
 	c.Set(GinContextField, session)
 	c.Next()
+	return nil
+}
+
+// Sign in func
+// Die Funktion erwartet folgende Parameter
+func AngularSignIn(fun FindUser) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		err := Signer(c, fun)
+		if err != nil {
+			NewFailResponse(err)
+		}
+	}
+}
+
+func Signer(c *gin.Context, fun FindUser) error {
+	name := c.Params.ByName(NameRequestField)
+	pass := c.Params.ByName(PassRequestField)
+
+	user, err := fun(name)
+	if err != nil {
+		return err
+	}
+
+	if user.Password() != pass {
+		return SignInErr
+	}
+
+	resp := NewSuccessResponse(UserIDData{
+		ID: user.ID(),
+	})
+	c.JSON(http.StatusOK, resp)
+
 	return nil
 }
