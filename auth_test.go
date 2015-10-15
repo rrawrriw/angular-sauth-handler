@@ -128,6 +128,16 @@ func ParseSignInResponse(r *bytes.Buffer) (SuccessResponse, error) {
 	return NewSuccessResponse(data), nil
 }
 
+func ParseFailResponse(r *bytes.Buffer) (FailResponse, error) {
+	resp := FailResponse{}
+	err := json.Unmarshal(r.Bytes(), &resp)
+	if err != nil {
+		return FailResponse{}, err
+	}
+
+	return resp, nil
+}
+
 func EqualSignInResponse(r1, r2 SuccessResponse) error {
 	if r1.Status != r2.Status {
 		return errors.New("Unequal status")
@@ -148,6 +158,17 @@ func EqualSignInResponse(r1, r2 SuccessResponse) error {
 
 	return nil
 
+}
+
+func EqualFailResponse(r1, r2 FailResponse) error {
+	if r1.Status != r2.Status {
+		return errors.New("Unequal status")
+	}
+	if r1.Err != r2.Err {
+		return errors.New("Unequal error")
+	}
+
+	return nil
 }
 
 func Test_VerifyAuth_OK(t *testing.T) {
@@ -291,6 +312,39 @@ func Test_GET_SignIn_OK(t *testing.T) {
 	err = EqualSignInResponse(expectResp, result)
 	if err != nil {
 		t.Fatal("Expect", expectResp, "was", resp)
+	}
+
+}
+
+func Test_GET_SignIn_Fail(t *testing.T) {
+	name := "ladykiller_XX"
+	pass := "123"
+
+	handler := gin.New()
+	req := TestRequest{
+		Body:    "",
+		Header:  http.Header{},
+		Handler: handler,
+	}
+
+	getPass := func(x string) (User, error) {
+		u := TestUser{}
+		return u, nil
+	}
+
+	handler.GET("/:name/:pass", AngularSignIn(getPass))
+
+	url := fmt.Sprintf("/%v/%v", name, pass)
+	resp := req.Send("GET", url)
+
+	resultResp, err := ParseFailResponse(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectResp := NewFailResponse(SignInErr)
+	err = EqualFailResponse(expectResp, resultResp)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 }

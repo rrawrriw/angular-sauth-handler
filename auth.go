@@ -146,7 +146,8 @@ func AngularSignIn(fun FindUser) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		err := Signer(c, fun)
 		if err != nil {
-			NewFailResponse(err)
+			c.JSON(http.StatusUnauthorized,
+				NewFailResponse(err))
 		}
 	}
 }
