@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 
 	"github.com/gin-gonic/gin"
 )
@@ -108,7 +110,8 @@ func ParseSignInResponse(r *bytes.Buffer) (SuccessResponse, error) {
 	}
 
 	if resp.Status != "success" {
-		return SuccessResponse{}, errors.New("Wrong status")
+		m := fmt.Sprintf("Wrong status %v", resp.Status)
+		return SuccessResponse{}, errors.New(m)
 	}
 
 	v, ok := resp.Data.(map[string]interface{})
@@ -169,6 +172,80 @@ func EqualFailResponse(r1, r2 FailResponse) error {
 	}
 
 	return nil
+}
+
+func ValidSignInCookie(r *httptest.ResponseRecorder) error {
+
+	v, ok := r.HeaderMap["Set-Cookie"]
+	if !ok {
+		m := fmt.Sprintf("Expect a cookie was %v", r.HeaderMap)
+		return errors.New(m)
+	}
+	if !strings.Contains(v[0], XSRFCookieName) {
+		m := fmt.Sprintf("Expect %v was %v",
+			XSRFCookieName, r.HeaderMap)
+		return errors.New(m)
+	}
+
+	return nil
+}
+
+func ExistsToken(tokens []string, t string) bool {
+	for _, e := range tokens {
+		if t == e {
+			return false
+		}
+	}
+
+	return true
+}
+
+func ExistsUserSession(coll *mgo.Collection, r SuccessResponse) error {
+	data, ok := r.Data.(UserIDData)
+	if !ok {
+		m := fmt.Sprintf("Wrong SuccessResponse %v", r)
+		return errors.New(m)
+	}
+	query := bson.M{"UserID": data.ID}
+	c, err := coll.Find(query).Count()
+	if err != nil {
+		return err
+	}
+
+	if c != 1 {
+		return errors.New("Expect new session in db")
+	}
+
+	return nil
+}
+
+func EncryptPassword(p string) string {
+	return p
+}
+
+func Test_NewSessionToken_OK(t *testing.T) {
+	tokens := []string{}
+	for x := 0; x < 10; x++ {
+		token, err := NewSessionToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ExistsToken(tokens, token) {
+			t.Fatal("Expect every token to be unique", token)
+		}
+		tokens = append(tokens, token)
+	}
+}
+
+func Test_NewSha512Password_OK(t *testing.T) {
+	tokens := []string{}
+	for x := 0; x < 10; x++ {
+		token := NewSha512Password(string(x))
+		if !ExistsToken(tokens, token) {
+			t.Fatal("Expect every token to be unique", token)
+		}
+		tokens = append(tokens, token)
+	}
 }
 
 func Test_VerifyAuth_OK(t *testing.T) {
@@ -282,6 +359,11 @@ func Test_GET_SignIn_OK(t *testing.T) {
 	name := "ladykiller_XX"
 	pass := "123"
 
+	s, db := DialTestDB(t)
+	defer CleanTestDB(t, s, db)
+
+	coll := db.C(TestSessionsColl)
+
 	handler := gin.New()
 	req := TestRequest{
 		Body:    "",
@@ -294,7 +376,9 @@ func Test_GET_SignIn_OK(t *testing.T) {
 		return u, nil
 	}
 
-	handler.GET("/:name/:pass", AngularSignIn(getPass))
+	d := time.Duration(1 * time.Hour)
+	h := AngularSignIn(coll, getPass, EncryptPassword, d)
+	handler.GET("/:name/:pass", h)
 
 	url := fmt.Sprintf("/%v/%v", name, pass)
 	resp := req.Send("GET", url)
@@ -311,7 +395,17 @@ func Test_GET_SignIn_OK(t *testing.T) {
 
 	err = EqualSignInResponse(expectResp, result)
 	if err != nil {
-		t.Fatal("Expect", expectResp, "was", resp)
+		t.Fatal(err)
+	}
+
+	err = ValidSignInCookie(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = ExistsUserSession(coll, result)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 }
@@ -319,6 +413,11 @@ func Test_GET_SignIn_OK(t *testing.T) {
 func Test_GET_SignIn_Fail(t *testing.T) {
 	name := "ladykiller_XX"
 	pass := "123"
+
+	s, db := DialTestDB(t)
+	defer CleanTestDB(t, s, db)
+
+	coll := db.C(TestSessionsColl)
 
 	handler := gin.New()
 	req := TestRequest{
@@ -332,7 +431,9 @@ func Test_GET_SignIn_Fail(t *testing.T) {
 		return u, nil
 	}
 
-	handler.GET("/:name/:pass", AngularSignIn(getPass))
+	e := time.Duration(1 * time.Hour)
+	h := AngularSignIn(coll, getPass, EncryptPassword, e)
+	handler.GET("/:name/:pass", h)
 
 	url := fmt.Sprintf("/%v/%v", name, pass)
 	resp := req.Send("GET", url)

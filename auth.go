@@ -1,6 +1,9 @@
 package aauth
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/sha512"
 	"errors"
 	"fmt"
 	"net/http"
@@ -49,7 +52,8 @@ type (
 		Password() string
 	}
 
-	FindUser func(string) (User, error)
+	FindUser        func(string) (User, error)
+	ConvertPassword func(string) string
 )
 
 func NewSuccessResponse(data interface{}) SuccessResponse {
@@ -64,6 +68,27 @@ func NewFailResponse(err interface{}) FailResponse {
 		Status: "fail",
 		Err:    fmt.Sprintf("%v", err),
 	}
+}
+
+func NewSessionToken() (string, error) {
+	buf := make([]byte, 2)
+
+	_, err := rand.Read(buf)
+	if err != nil {
+		return "", err
+	}
+
+	c := sha256.New()
+	hash := fmt.Sprintf("%x", c.Sum(buf))
+
+	return hash, nil
+}
+
+func NewSha512Password(pass string) string {
+	hash := sha512.New()
+	tmp := hash.Sum([]byte(pass))
+	passHash := fmt.Sprintf("%x", tmp)
+	return passHash
 }
 
 // Middleware Decorator:
@@ -140,11 +165,9 @@ func Auther(c *gin.Context, db *mgo.Database, sessionsColl string) error {
 	return nil
 }
 
-// Sign in func
-// Die Funktion erwartet folgende Parameter
-func AngularSignIn(fun FindUser) gin.HandlerFunc {
+func AngularSignIn(coll *mgo.Collection, findUser FindUser, cPass ConvertPassword, expireTime time.Duration) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		err := Signer(c, fun)
+		err := Signer(c, coll, findUser, cPass, expireTime)
 		if err != nil {
 			c.JSON(http.StatusUnauthorized,
 				NewFailResponse(err))
@@ -152,22 +175,51 @@ func AngularSignIn(fun FindUser) gin.HandlerFunc {
 	}
 }
 
-func Signer(c *gin.Context, fun FindUser) error {
+func Signer(c *gin.Context, coll *mgo.Collection, findUser FindUser, convertPassword ConvertPassword, expireTime time.Duration) error {
 	name := c.Params.ByName(NameRequestField)
 	pass := c.Params.ByName(PassRequestField)
 
-	user, err := fun(name)
+	passHash := convertPassword(pass)
+
+	user, err := findUser(name)
 	if err != nil {
 		return err
 	}
 
-	if user.Password() != pass {
+	if user.Password() != passHash {
 		return SignInErr
 	}
 
 	resp := NewSuccessResponse(UserIDData{
 		ID: user.ID(),
 	})
+
+	sessionToken, err := NewSessionToken()
+	if err != nil {
+		return err
+	}
+
+	expire := time.Now().Add(expireTime)
+
+	session := Session{
+		UserID:  user.ID(),
+		Token:   sessionToken,
+		Expires: expire,
+	}
+
+	err = coll.Insert(session)
+	if err != nil {
+		return err
+	}
+
+	cookie := http.Cookie{
+		Name:    XSRFCookieName,
+		Value:   sessionToken,
+		Expires: expire,
+	}
+
+	http.SetCookie(c.Writer, &cookie)
+
 	c.JSON(http.StatusOK, resp)
 
 	return nil
