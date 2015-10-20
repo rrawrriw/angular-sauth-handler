@@ -216,6 +216,10 @@ func Signer(c *gin.Context, coll *mgo.Collection, findUser FindUser, convertPass
 		Name:    XSRFCookieName,
 		Value:   sessionToken,
 		Expires: expire,
+		// Setze Path auf / ansonsten kann angularjs
+		// diese Cookie nicht finden und in späteren
+		// Request nicht mitsenden.
+		Path: "/",
 	}
 
 	http.SetCookie(c.Writer, &cookie)
