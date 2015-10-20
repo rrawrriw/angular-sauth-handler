@@ -174,6 +174,17 @@ func EqualFailResponse(r1, r2 FailResponse) error {
 	return nil
 }
 
+func EqualSession(s1, s2 Session) error {
+	if s1.Token == s2.Token &&
+		s1.UserID == s2.UserID &&
+		s1.Expires.Equal(s2.Expires) {
+		return nil
+	}
+
+	m := fmt.Sprintf("Expect", s1, "was", s2)
+	return errors.New(m)
+}
+
 func ValidSignInCookie(r *httptest.ResponseRecorder) error {
 
 	v, ok := r.HeaderMap["Set-Cookie"]
@@ -448,4 +459,26 @@ func Test_GET_SignIn_Fail(t *testing.T) {
 		t.Fatal(err)
 	}
 
+}
+
+func Test_ReadSession_OK(t *testing.T) {
+	ctx := &gin.Context{}
+
+	session := Session{
+		UserID:  "",
+		Token:   "",
+		Expires: time.Now(),
+	}
+
+	ctx.Set(GinContextField, session)
+
+	result, err := ReadSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = EqualSession(session, result)
+	if err != nil {
+		t.Fatal(err)
+	}
 }

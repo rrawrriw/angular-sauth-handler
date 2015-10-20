@@ -91,6 +91,20 @@ func NewSha512Password(pass string) string {
 	return passHash
 }
 
+func ReadSession(ctx *gin.Context) (Session, error) {
+	v, err := ctx.Get(GinContextField)
+	if err != nil {
+		return Session{}, err
+	}
+
+	s, ok := v.(Session)
+	if !ok {
+		return Session{}, errors.New("Wrong session in cookie")
+	}
+
+	return s, nil
+}
+
 // Middleware Decorator:
 // Handles Angularjs Default Authentication
 // Sendet man über den angular http Serviecs ein Request und erhält
